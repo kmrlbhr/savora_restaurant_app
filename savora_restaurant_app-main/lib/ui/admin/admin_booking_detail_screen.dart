@@ -6,20 +6,33 @@ import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/models/booking_model.dart';
 import '../../data/repositories/booking_repository.dart';
+import '../../providers/booking_providers.dart';
 import '../common/widgets/app_button.dart';
 import '../common/widgets/error_dialog.dart';
 
-class BookingDetailScreen extends ConsumerStatefulWidget {
+/// Admin view for a single booking with status management actions.
+///
+/// Displays full booking details including customer info, package,
+/// date, guests, custom fees, and total price.
+///
+/// Admin actions (only for upcoming bookings):
+/// - Cancel booking → sets status to 'cancelled'
+/// - Mark as completed → sets status to 'past'
+///
+/// Uses [BookingRepository.updateStatus] for direct status changes
+/// and [BookingRepository.cancelBooking] for cancellations.
+class AdminBookingDetailScreen extends ConsumerStatefulWidget {
   final String bookingId;
 
-  const BookingDetailScreen({super.key, required this.bookingId});
+  const AdminBookingDetailScreen({super.key, required this.bookingId});
 
   @override
-  ConsumerState<BookingDetailScreen> createState() =>
-      _BookingDetailScreenState();
+  ConsumerState<AdminBookingDetailScreen> createState() =>
+      _AdminBookingDetailScreenState();
 }
 
-class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
+class _AdminBookingDetailScreenState
+    extends ConsumerState<AdminBookingDetailScreen> {
   BookingModel? _booking;
   bool _isLoading = true;
   bool _isUpdating = false;
@@ -31,54 +44,20 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
   }
 
   Future<void> _loadBooking() async {
-    final repo = ref.read(bookingRepositoryProvider);
-    final booking = await repo.getBooking(widget.bookingId);
-    if (mounted)
-      setState(() {
-        _booking = booking;
-        _isLoading = false;
-      });
-  }
-
-  /// Derives the base price per guest from the current booking.
-  ///
-  /// Uses integer-safe division: subtracts custom fees first, then divides
-  /// by numGuests. This avoids floating-point drift that occurs when
-  /// dividing the total (which includes fees) by guest count.
-  double _deriveBasePrice(BookingModel booking) {
-    final feeTotal = booking.customFees.fold<double>(
-      0,
-      (subtotal, f) => subtotal + f.amount,
-    );
-    final priceWithoutFees = booking.totalPrice - feeTotal;
-    return booking.numGuests > 0 ? priceWithoutFees / booking.numGuests : 0;
-  }
-
-  Future<void> _updateGuests(int newGuests) async {
-    if (_booking == null || newGuests < 1) return;
-
-    setState(() => _isUpdating = true);
     try {
       final repo = ref.read(bookingRepositoryProvider);
-      final updated = _booking!.copyWith(
-        numGuests: newGuests,
-        totalPrice: BookingRepository.calculateTotal(
-          _deriveBasePrice(_booking!),
-          newGuests,
-          _booking!.customFees,
-        ),
-      );
-      await repo.updateBooking(updated);
-      setState(() => _booking = updated);
+      final booking = await repo.getBooking(widget.bookingId);
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Guest count updated')));
+        setState(() {
+          _booking = booking;
+          _isLoading = false;
+        });
       }
     } catch (e) {
-      if (mounted) showErrorDialog(context, e);
-    } finally {
-      if (mounted) setState(() => _isUpdating = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+        showErrorDialog(context, e);
+      }
     }
   }
 
@@ -87,7 +66,7 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
       context,
       title: 'Cancel Booking',
       message:
-          'Are you sure you want to cancel this booking? This cannot be undone.',
+          'Are you sure you want to cancel this booking for ${_booking!.userName}? This cannot be undone.',
       confirmLabel: 'Cancel Booking',
       isDestructive: true,
     );
@@ -102,6 +81,32 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Booking cancelled')));
+      }
+    } catch (e) {
+      if (mounted) showErrorDialog(context, e);
+    } finally {
+      if (mounted) setState(() => _isUpdating = false);
+    }
+  }
+
+  Future<void> _markAsCompleted() async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Mark as Completed',
+      message: 'Mark this booking for ${_booking!.userName} as completed/past?',
+      confirmLabel: 'Mark Completed',
+    );
+    if (!confirmed) return;
+
+    setState(() => _isUpdating = true);
+    try {
+      final repo = ref.read(bookingRepositoryProvider);
+      await repo.updateStatus(widget.bookingId, AppConstants.statusPast);
+      await _loadBooking();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Booking marked as completed')),
+        );
       }
     } catch (e) {
       if (mounted) showErrorDialog(context, e);
@@ -178,7 +183,46 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
             ),
             const SizedBox(height: 24),
 
-            // Details
+            // Customer info card
+            Card(
+              color: AppColors.goldMuted,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    const CircleAvatar(
+                      backgroundColor: AppColors.navy,
+                      radius: 20,
+                      child: Icon(
+                        Icons.person,
+                        color: AppColors.gold,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            booking.userName,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Customer',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Booking details
             _detailRow(
               Icons.calendar_today,
               'Event Date',
@@ -199,6 +243,7 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
                 AppConstants.dateTimeFormatDisplay,
               ).format(booking.createdAt),
             ),
+            _detailRow(Icons.confirmation_number, 'Booking ID', booking.id),
             const SizedBox(height: 24),
 
             // Custom fees
@@ -225,55 +270,28 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
               const SizedBox(height: 24),
             ],
 
-            // Actions (only for upcoming bookings)
+            // Admin actions (only for upcoming bookings)
             if (isUpcoming) ...[
-              // Modify guest count
-              Text(
-                'Modify Guests',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  border: Border.all(color: AppColors.grey300),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    IconButton(
-                      onPressed: booking.numGuests > 1
-                          ? () => _updateGuests(booking.numGuests - 1)
-                          : null,
-                      icon: const Icon(Icons.remove_circle_outline),
-                    ),
-                    Text(
-                      '${booking.numGuests}',
-                      style: Theme.of(context).textTheme.headlineMedium,
-                    ),
-                    IconButton(
-                      onPressed: () => _updateGuests(booking.numGuests + 1),
-                      icon: const Icon(
-                        Icons.add_circle_outline,
-                        color: AppColors.navy,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 24),
+              Text('Actions', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 12),
 
-              // Cancel button
+              // Mark as completed
+              AppButton.primary(
+                label: 'Mark as Completed',
+                onPressed: _isUpdating ? null : _markAsCompleted,
+                loading: _isUpdating,
+                icon: Icons.check_circle,
+              ),
+              const SizedBox(height: 12),
+
+              // Cancel booking
               AppButton.outlined(
                 label: 'Cancel Booking',
                 onPressed: _isUpdating ? null : _cancelBooking,
                 loading: _isUpdating,
                 icon: Icons.cancel_outlined,
               ),
+              const SizedBox(height: 24),
             ],
           ],
         ),

@@ -18,6 +18,8 @@ import '../ui/admin/admin_shell.dart';
 import '../ui/admin/manage_packages_screen.dart';
 import '../ui/admin/package_form_screen.dart';
 import '../ui/admin/admin_profile_screen.dart';
+import '../ui/admin/manage_bookings_screen.dart';
+import '../ui/admin/admin_booking_detail_screen.dart';
 
 /// Application router configuration using go_router.
 ///
@@ -67,10 +69,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       }
 
       // Public routes — accessible without auth
-      final publicRoutes = [
-        AppConstants.loginPath,
-        AppConstants.registerPath,
-      ];
+      final publicRoutes = [AppConstants.loginPath, AppConstants.registerPath];
 
       // If not authenticated and trying to access a protected route
       if (!isAuthenticated && !publicRoutes.contains(location)) {
@@ -220,10 +219,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: AppConstants.adminBookingsPath,
                 name: 'admin_bookings',
-                builder: (context, state) => const _PlaceholderScreen(
-                  title: 'Manage Bookings',
-                  icon: Icons.book_online,
-                ),
+                builder: (context, state) => const ManageBookingsScreen(),
+                routes: [
+                  GoRoute(
+                    path: ':id',
+                    name: 'admin_booking_detail',
+                    builder: (context, state) {
+                      final id = state.pathParameters['id']!;
+                      return AdminBookingDetailScreen(bookingId: id);
+                    },
+                  ),
+                ],
               ),
             ],
           ),
@@ -266,36 +272,3 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     ),
   );
 });
-
-/// Temporary placeholder screen for routes not yet implemented.
-/// Will be replaced with real screens in future sprints.
-class _PlaceholderScreen extends StatelessWidget {
-  final String title;
-  final IconData icon;
-
-  const _PlaceholderScreen({required this.title, required this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 80, color: Colors.grey.shade300),
-            const SizedBox(height: 16),
-            Text(
-              title,
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Coming in next sprint',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
